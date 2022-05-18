@@ -6,7 +6,7 @@ const router = express.Router();
 
 
 router.post('/url/shorten', urlController.urlShort);
-// router.get('/:urlCode', urlController.urlCode)
+router.get('/:urlCode', urlController.urlCode)
 
 
 module.exports = router;

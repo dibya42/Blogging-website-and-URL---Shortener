@@ -2,6 +2,7 @@ const urlModel = require('../models/urlModel');
 const shortid = require('shortid');
 const { url } = require('inspector');
 const baseUrl = "http://localhost:3000";
+const redisClient =require('../redis/redis')
 
 
 const isValid = function(value){
@@ -28,6 +29,9 @@ function validateUrl(value) {
         value
     );
 }
+
+ //-------------------------------1st Api--------------------------------------------//
+
 
 
 const urlShort = async function(req, res){
@@ -60,9 +64,17 @@ const urlShort = async function(req, res){
         //-------------------------------Validation Ends--------------------------------------------//
 
 
+        let shortUrl = await redisClient.GET_ASYNC(`${checkUrl}`)
+        if (shortUrl) {
+            let cacheData = JSON.parse(shortUrl)
+            let cacheData1 = { longUrl: cacheData.longUrl, shortUrl: cacheData.shortUrl, urlCode: cacheData.urlCode }
+            return res.status(200).send({ satus: true, msg: "ShortUrl already generated in cache", data: cacheData1 })
+        }
+
         let findUrlInDb = await urlModel.findOne({ longUrl: checkUrl }).select({ _id: 0, createdAt: 0, updatedAt: 0, __v: 0 })
         if (findUrlInDb) {
-            return res.status(200).send({ status: true, message: "ShortUrl generated successfully in DB", data: findUrlInDb })
+            await redisClient.SET_ASYNC(`${checkUrl}`, JSON.stringify(findUrlInDb))
+            return res.status(200).send({ status: true, message: "ShortUrl already generated in DB", data: findUrlInDb })
         }
 
         const urlCode = shortid.generate().toLowerCase()
@@ -72,13 +84,54 @@ const urlShort = async function(req, res){
         url = {urlCode: urlCode,longUrl: checkUrl,shortUrl: shortUrl}
         await urlModel.create(url)
 
+        const newUrl1 = await urlModel.findOne({ urlCode })
         const newUrl = await urlModel.findOne({ urlCode }).select({ _id: 0, createdAt: 0, updatedAt: 0, __v: 0 })
 
-      
+        await redisClient.SET_ASYNC(`${checkUrl}`, JSON.stringify(newUrl1))
+        await redisClient.SET_ASYNC(`${urlCode}`, JSON.stringify(newUrl1))
+
         res.status(201).send({ status: true, data: newUrl })
         
-    }catch(error) {
-        res.status(500).send({status:false, msg: error.message})
+
+    } catch (err) {
+        return res.status(500).send({ status: false, message: err.message })
     }
 }
-module.exports.urlShort = urlShort
+
+ //-------------------------------2nd Api--------------------------------------------//
+
+
+const urlCode = async function(req,res) {
+    try{
+
+        let urlCode = req.params.urlCode
+
+        if(urlCode.length === 0 ){
+            res.status(400).send({status:false, msg:"No url found"})
+            return
+        }
+
+        let findUrlInCache = await redisClient.GET_ASYNC(`${urlCode}`)
+
+        if(findUrlInCache) {
+            let cacheData = JSON.parse(findUrlInCache)
+            return res.status(200).send({ msg:"From cache", data:cacheData.longUrl })
+        }
+         else {
+            const url = await urlModel.findOne({urlCode: urlCode})
+            if(!url){
+                return res.status(400).send({status: false, msg: "No url found"})
+            } else {
+                let oldUrl = url.longUrl
+
+                res.status(200).send({dada: oldUrl})
+                await redisClient.SET_ASYNC(`${url.urlCode}`, JSON.stringify(url))
+            }
+        }
+
+    } catch (err) {
+        return res.status(500).send({  status: false, message: err.message})
+    }
+}
+
+module.exports = { urlShort, urlCode }
